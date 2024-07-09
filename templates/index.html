@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Calculate Sunlight Hours</title>
+</head>
+<body>
+    <h1>Enter Address</h1>
+    <form id="addressForm">
+        <input type="text" name="address" id="address" required>
+        <button type="submit">Calculate</button>
+    </form>
+
+    <script>
+        document.getElementById('addressForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const response = await fetch('/calculate', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                const resultUrl = await response.text();
+                window.location.href = resultUrl;
+            } else {
+                const error = await response.json();
+                alert(error.error);
+            }
+        });
+    </script>
+</body>
+</html>

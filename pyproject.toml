@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "sunlight-tracker"
+version = "0.1.0"
+description = ""
+authors = ["Junting Chen <chen112p@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "^2.0.0"
+fastapi = "^0.111.0"
+uvicorn = "^0.30.1"
+requests = "^2.32.3"
+jinja2 = "^3.1.4"
+geopandas = "^1.0.1"
+osmnx = "^1.9.3"
+pyvista = "^0.44.0"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

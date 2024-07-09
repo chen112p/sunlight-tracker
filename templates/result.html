@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sunlight Hours Calculation Result</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/loaders/STLLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <h1>Sunlight Hours Calculation Result</h1>
+    <div id="viewer" style="width: 100%; height: 500px;"></div>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const stlFilePath = urlParams.get('stl_file_path');
+
+            if (stlFilePath) {
+                const viewer = document.getElementById('viewer');
+                const width = viewer.clientWidth;
+                const height = viewer.clientHeight;
+
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+                const renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(width, height);
+                viewer.appendChild(renderer.domElement);
+
+                const controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.25;
+                controls.screenSpacePanning = false;
+                controls.minDistance = 10;
+                controls.maxDistance = 500;
+
+                const loader = new THREE.STLLoader();
+                loader.load(stlFilePath, function (geometry) {
+                    console.log('STL file loaded:', geometry);
+                    const material = new THREE.MeshNormalMaterial();
+                    const mesh = new THREE.Mesh(geometry, material);
+                    scene.add(mesh);
+
+                    camera.position.set(0, 0, 100);
+                    controls.update();
+
+                    const animate = function () {
+                        requestAnimationFrame(animate);
+                        controls.update();
+                        renderer.render(scene, camera);
+                    };
+
+                    animate();
+                }, undefined, function (error) {
+                    console.error('Error loading the STL file:', error);
+                    alert('Error loading the STL file. Check the console for more details.');
+                });
+            } else {
+                alert('STL file path not found.');
+            }
+        });
+    </script>
+</body>
+</html>
