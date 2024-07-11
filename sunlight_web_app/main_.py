@@ -11,9 +11,7 @@ from pyproj import Proj, transform
 import pyvista as pv
 import json
 import os
-import pytz
-from pysolar.solar import *
-import datetime
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -26,82 +24,32 @@ async def read_root(request: Request):
 async def calculate_sunlight_hours(request: Request, address: str = Form(...)):
     if not address:
         return JSONResponse(content={"error": "No address provided"}, status_code=400)
-    combined_mesh,long,lat = get_geometry(address)
-
-    sunlight_surf = get_sun_hours(combined_mesh,long,lat)
+    combined_mesh = get_geometry(address)
     
-    gltf_file_path = 'static/output.gltf'
-    #sunlight_surf.save('static/test.vtk')
-    sunlight_surf['scaler'] = len(sunlight_surf['sunlight']) * [2]
-    sunlight_surf_glyph = sunlight_surf.glyph(scale='scaler',geom=pv.Box())
+    # Save the mesh to a JSON file
+    #mesh_url = "static/combined_mesh.json"
+    #vertices = combined_mesh.points.tolist()
+    #faces = combined_mesh.faces.tolist()
+    
+    #mesh_data = {
+    #    "vertices": vertices,
+    #    "faces": faces
+    #}
+    
+    # Save the mesh to an STL file
+    #stl_img_path = os.path.join(os.getcwd(),'static','buildings.png')
+    img_path = 'static/buildings.png'
+    os.makedirs(os.path.dirname(img_path), exist_ok=True)
 
     p = pv.Plotter(lighting=None,off_screen=True)
-    p.add_mesh(sunlight_surf_glyph,scalars='sunlight',point_size=10,clim=[0,12])
     p.add_mesh(combined_mesh)
-    p.export_gltf(gltf_file_path)
-
-    result_page_url = f"/result?gltf_file_path=/{gltf_file_path}"
-
+    p.show(screenshot=img_path)
+    result_page_url = f"/result?img_path={img_path}"
     return result_page_url
 
 @app.get("/result", response_class=HTMLResponse)
-async def result_page(request: Request, gltf_file_path: str):
-    return templates.TemplateResponse("result.html", {"request": request, "gltf_file_path": gltf_file_path})
-def get_sun_hours(buildings,long,lat):
-    grid = get_grid()
-    central_points = grid.cell_centers()
-    est = pytz.timezone('US/Eastern')
-    hours = np.arange(0,23,1)
-    minutes = np.array([0,30])
-    total_rec = 0
-    bright_field = np.zeros(central_points.points.shape[0])
-    for i_h, hr_ in enumerate(hours):
-        for i_m, min_ in enumerate(minutes):
-            est_time = est.localize(datetime.datetime(2023, 7, 1, hr_, min_, 0))  # Replace with your desired EST time
-            # Convert EST time to UTC
-            utc_time = est_time.astimezone(pytz.utc)
-            #get sun location
-            d_sun = 1.5e11
-            alt_deg = get_altitude(lat, long, utc_time)
-            az_deg = get_azimuth(lat, long, utc_time)
-
-            sun_coord = np.array([np.cos(np.deg2rad(az_deg)) * d_sun, 
-                                np.sin(np.deg2rad(az_deg)) * d_sun, 
-                                np.sin(np.deg2rad(alt_deg)) * d_sun])
- 
-            cell_ind = []
-            #print(radiation.get_radiation_direct(utc_time, alt_deg))
-            if radiation.get_radiation_direct(utc_time, alt_deg) > 0: 
-                total_rec += 1
-                for i,point in enumerate(central_points.points):
-                    points, ind = buildings.ray_trace(point, sun_coord)
-                    if len(points) == 0:
-                        bright_field[i] += 1
-            
-    central_points['sunlight'] = bright_field
-
-    #grid = grid.interpolate(central_points)
-    return central_points
-
-def get_grid():
-    length = 100  # Length of the grid in meters
-    width = 100   # Width of the grid in meters
-    resolution = 2.5  # Resolution of the grid in meters
-
-    # Generate grid points
-    x = np.arange(-length, length + resolution, resolution)
-    y = np.arange(-length, width + resolution, resolution)
-    z = np.zeros((len(x), len(y)))  # Flat surface (z=0)
-
-    # Create a mesh grid
-    x, y = np.meshgrid(x, y)
-    points = np.c_[x.ravel(), y.ravel(), z.ravel()]
-
-    # Create a PyVista StructuredGrid
-    grid = pv.StructuredGrid()
-    grid.points = points
-    grid.dimensions = (len(x), len(y), 1)
-    return(grid)
+async def result_page(request: Request, img_path: str):
+    return templates.TemplateResponse("result.html", {"request": request, "img_path": img_path})
 
 def get_building_height(building, default_height = 10):
     if 'height' in building:
@@ -175,7 +123,7 @@ def get_geometry(address):
     for mesh in building_meshes:
         combined_mesh += mesh
     
-    return (combined_mesh, longitude,latitude)
+    return combined_mesh
     
 
 
