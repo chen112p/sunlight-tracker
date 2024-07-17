@@ -14,6 +14,9 @@ import os
 import pytz
 from pysolar.solar import *
 import datetime
+import matplotlib.colors as mcolors
+import matplotlib.colors as clr
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -31,12 +34,17 @@ async def calculate_sunlight_hours(request: Request, address: str = Form(...)):
     sunlight_surf = get_sun_hours(combined_mesh,long,lat)
     
     gltf_file_path = 'static/output.gltf'
-    #sunlight_surf.save('static/test.vtk')
+    
     sunlight_surf['scaler'] = len(sunlight_surf['sunlight']) * [2]
     sunlight_surf_glyph = sunlight_surf.glyph(scale='scaler',geom=pv.Box())
+    sunlight_surf.save('static/output.vtk')
+    sunlight_surf_glyph.save('static/output_glpy.vtk')
+    
+    rbs = linear_colorscheme('static/rbs.json')
 
     p = pv.Plotter(lighting=None,off_screen=True)
-    p.add_mesh(sunlight_surf_glyph,scalars='sunlight',point_size=10,clim=[0,12])
+    #p.add_mesh(sunlight_surf_glyph,scalars='sunlight',point_size=10,clim=[0,8],cmap=rbs)
+    p.add_mesh(sunlight_surf,scalars='sunlight',clim=[0,12],cmap=rbs)
     p.add_mesh(combined_mesh)
     p.export_gltf(gltf_file_path)
 
@@ -49,12 +57,12 @@ async def result_page(request: Request, gltf_file_path: str):
     return templates.TemplateResponse("result.html", {"request": request, "gltf_file_path": gltf_file_path})
 def get_sun_hours(buildings,long,lat):
     grid = get_grid()
-    central_points = grid.cell_centers()
+    #central_points = grid.cell_centers()
     est = pytz.timezone('US/Eastern')
     hours = np.arange(0,23,1)
     minutes = np.array([0,30])
     total_rec = 0
-    bright_field = np.zeros(central_points.points.shape[0])
+    bright_field = np.zeros(grid.points.shape[0])
     for i_h, hr_ in enumerate(hours):
         for i_m, min_ in enumerate(minutes):
             est_time = est.localize(datetime.datetime(2023, 7, 1, hr_, min_, 0))  # Replace with your desired EST time
@@ -69,24 +77,22 @@ def get_sun_hours(buildings,long,lat):
                                 np.sin(np.deg2rad(az_deg)) * d_sun, 
                                 np.sin(np.deg2rad(alt_deg)) * d_sun])
  
-            cell_ind = []
-            #print(radiation.get_radiation_direct(utc_time, alt_deg))
-            if radiation.get_radiation_direct(utc_time, alt_deg) > 0: 
+            if radiation.get_radiation_direct(utc_time, alt_deg) > 200:
                 total_rec += 1
-                for i,point in enumerate(central_points.points):
+                for i,point in enumerate(grid.points):
                     points, ind = buildings.ray_trace(point, sun_coord)
                     if len(points) == 0:
                         bright_field[i] += 1
             
-    central_points['sunlight'] = bright_field
-
-    #grid = grid.interpolate(central_points)
-    return central_points
+    grid['sunlight'] = bright_field
+    grid['sunlight'] /= 2
+    #grid['sunlight'] = central_points['sunlight'] / 2
+    return grid
 
 def get_grid():
     length = 100  # Length of the grid in meters
     width = 100   # Width of the grid in meters
-    resolution = 2.5  # Resolution of the grid in meters
+    resolution = 2  # Resolution of the grid in meters
 
     # Generate grid points
     x = np.arange(-length, length + resolution, resolution)
@@ -98,12 +104,16 @@ def get_grid():
     points = np.c_[x.ravel(), y.ravel(), z.ravel()]
 
     # Create a PyVista StructuredGrid
+    """
     grid = pv.StructuredGrid()
     grid.points = points
     grid.dimensions = (len(x), len(y), 1)
+    """
+    grid = pv.PolyData(points)
+    grid = grid.delaunay_2d()
     return(grid)
 
-def get_building_height(building, default_height = 10):
+def get_building_height(building, default_height = 5):
     if 'height' in building:
         return float(building['height'])
     elif 'building:levels' in building:
@@ -177,6 +187,69 @@ def get_geometry(address):
     
     return (combined_mesh, longitude,latitude)
     
+def linear_colorscheme(json_path):
+    """Convert the json format linearly spaced color scheme to a matplotlib colormap.
+    Args:
+        json_path (str): Path of the color scheme in json format. Can be a direct output from paraview
+    Returns:
+        cmap (LinearSegmentedColormap): Linearly spaced colormap object. Can be used in pyvista plotters
+    """
+    with open(json_path) as f:
+        color_dict = json.load(f)[0]
+    # read control points (RGB)
+    control_points_rgb = []
+    points = []
+    if len(color_dict['RGBPoints']) % 4 != 0:
+        raise ValueError("RGPPoints length is not correct")
+    for i in range(int(len(color_dict['RGBPoints'])/4)):
+        control_points_rgb.append((color_dict['RGBPoints'][i*4+1],color_dict['RGBPoints'][i*4+2],color_dict['RGBPoints'][i*4+3]))
+        points.append(color_dict['RGBPoints'][i*4])
+    points_ratio = [(x - points[0]) / (points[-1] - points[0]) for x in points]
+    # interpolate color values between control points based on selected color space
+    # paraview also has diverging, lab/CIEDE2000, step but here they are not included
+    # first need to convert RGBPoints to the selected color space
+    # then interpolate between control points
+    # then convert the value from the selected color space back to RGB because matplotlib only takes RGB
+    N = 255
+    def interp_rgb(mapped_color, points_ratio):
+        cmap_data = np.ones((N, 3))
+        for i in range(len(mapped_color)-1):
+            idx_start = int(points_ratio[i] * N)
+            idx_end = int(points_ratio[i+1] * N)
+            cmap_data[idx_start:idx_end, 0] = np.linspace(mapped_color[i][0],
+                                        control_points_rgb[i+1][0], 
+                                        idx_end - idx_start)
+            cmap_data[idx_start:idx_end, 1] = np.linspace(mapped_color[i][1],
+                                        control_points_rgb[i+1][1], 
+                                        idx_end - idx_start)
+            cmap_data[idx_start:idx_end, 2] = np.linspace(mapped_color[i][2],
+                                        control_points_rgb[i+1][2], 
+                                        idx_end - idx_start)
+        return(cmap_data)
+    def interp_hsv(mapped_color,points_ratio):
+        cmap_data = np.ones((N+1, 3))
+        x = np.zeros(N+1)
+        for i in range(len(points_ratio)-1):
+            idx_start = int(points_ratio[i] * N)
+            idx_end = int(points_ratio[i+1] * N)
+            x[idx_start:(idx_end+1)] = np.linspace(points_ratio[i], points_ratio[i+1], idx_end - idx_start+1)
+        cmap_data[:, 0] = np.interp(x, np.linspace(0, 1, len(mapped_color)), [p[0] for p in mapped_color])
+        cmap_data[:, 1] = np.interp(x, np.linspace(0, 1, len(mapped_color)), [p[1] for p in mapped_color])
+        cmap_data[:, 2] = np.interp(x, np.linspace(0, 1, len(mapped_color)), [p[2] for p in mapped_color])
+        return(cmap_data)
+    if color_dict['ColorSpace'].lower() == 'lab':
+        from colorspacious import cspace_convert
+        mapped_color = cspace_convert(control_points_rgb, start='sRGB1', end='CIELab')
+        rgb_colors = cspace_convert(interp_rgb(mapped_color,points_ratio), start='CIELab', end='sRGB1')
+    elif color_dict['ColorSpace'].lower() == 'hsv':
+        mapped_color = [mcolors.rgb_to_hsv(rgb) for rgb in control_points_rgb]
+        rgb_colors = [mcolors.hsv_to_rgb(map_data) for map_data in interp_hsv(mapped_color,points_ratio)]
+    else:
+        rgb_colors = interp_rgb(control_points_rgb,points_ratio)
+    cmap = clr.LinearSegmentedColormap.from_list(color_dict['Name'], rgb_colors, N)
+    if 'NanColor' in color_dict.keys():
+        cmap.set_bad(color = color_dict['NanColor'])
+    return (cmap)
 
 
 
